@@ -86,11 +86,11 @@ function seed(): DemoDb {
     memories: [
       { id: 'demo-m1', characterId: 'demo-c1', name: 'Lâmina do Silêncio Branco', kind: 'Arma', rank: 1, tier: 2,
         description: 'Uma adaga de gelo que não derrete. Quando desembainhada, os sons ao redor ficam abafados.',
-        enchantments: '[Quietude] Passos e respiração da portadora não fazem som.', createdAt: '2026-09-02T22:20:00.000Z' },
+        enchantments: '[Quietude] Passos e respiração da portadora não fazem som.', color: '#E8ECF5', imagePath: null, imageUrl: null, createdAt: '2026-09-02T22:20:00.000Z' },
       { id: 'demo-m2', characterId: 'demo-c1', name: 'Manto de Penas Cinzentas', kind: 'Armadura', rank: 1, tier: 1,
-        description: 'Leve como cinza, aquece mesmo nas noites mais frias do Reino.', enchantments: '', createdAt: '2026-09-16T23:50:00.000Z' },
+        description: 'Leve como cinza, aquece mesmo nas noites mais frias do Reino.', enchantments: '', color: '#B8B8B8', imagePath: null, imageUrl: null, createdAt: '2026-09-16T23:50:00.000Z' },
       { id: 'demo-m3', characterId: 'demo-c4', name: 'Bússola das Ruínas', kind: 'Ferramenta', rank: 2, tier: 1,
-        description: 'Aponta sempre para o lugar mais antigo nas redondezas.', enchantments: '', createdAt: '2026-09-01T20:00:00.000Z' },
+        description: 'Aponta sempre para o lugar mais antigo nas redondezas.', enchantments: '', color: '#E8C27A', imagePath: null, imageUrl: null, createdAt: '2026-09-01T20:00:00.000Z' },
     ],
     sections: DEFAULT_SECTIONS.map((s) => ({ ...s })),
     settings: { playersCanGrantXp: false, playersCanCreateCharacters: true,
@@ -370,7 +370,7 @@ export class DemoRepository implements Repository {
     return (this.db.memories ?? [])
       .filter((m) => m.characterId === characterId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-      .map((m) => ({ ...m }));
+      .map((m) => ({ ...m, color: m.color ?? null, imagePath: m.imagePath ?? null, imageUrl: m.imageUrl ?? null }));
   }
 
   async saveMemory(input: MemoryInput): Promise<Memory> {
@@ -379,10 +379,27 @@ export class DemoRepository implements Repository {
     if (!name) throw new Error('Dê um nome à Memória.');
     this.db.memories = this.db.memories ?? [];
     const existing = input.id ? this.db.memories.find((m) => m.id === input.id) : undefined;
-    const m: Memory = { ...input, name, id: existing?.id ?? uid(), createdAt: existing?.createdAt ?? now() };
+    const m: Memory = { ...input, name, imagePath: existing?.imagePath ?? null, imageUrl: existing?.imageUrl ?? null, id: existing?.id ?? uid(), createdAt: existing?.createdAt ?? now() };
     this.db.memories = this.db.memories.filter((x) => x.id !== m.id);
     this.db.memories.push(m);
     this.save();
+    return { ...m };
+  }
+
+  async setMemoryImage(memory: Memory, image: Blob | null): Promise<Memory> {
+    const m = (this.db.memories ?? []).find((x) => x.id === memory.id);
+    if (!m) throw new Error('Memória não encontrada.');
+    this.findEditable(m.characterId);
+    const prev = { url: m.imageUrl, path: m.imagePath };
+    m.imageUrl = image ? await blobToDataUrl(image) : null;
+    m.imagePath = image ? `demo/memory/${m.id}` : null;
+    try {
+      this.save();
+    } catch (e) {
+      m.imageUrl = prev.url;
+      m.imagePath = prev.path;
+      throw e;
+    }
     return { ...m };
   }
 

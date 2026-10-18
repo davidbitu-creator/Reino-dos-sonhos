@@ -64,10 +64,14 @@ export interface Memory {
   tier: number;
   description: string;
   enchantments: string;
+  /** Cor do mini-núcleo (#RRGGBB) ou null para usar a cor do Núcleo da Alma */
+  color: string | null;
+  imagePath: string | null;
+  imageUrl: string | null;
   createdAt: string;
 }
 
-export type MemoryInput = Omit<Memory, 'id' | 'createdAt'> & { id?: string };
+export type MemoryInput = Omit<Memory, 'id' | 'createdAt' | 'imagePath' | 'imageUrl'> & { id?: string };
 
 export interface XpEvent {
   id: string;
@@ -158,6 +162,8 @@ export interface Repository {
   listMemories(characterId: string): Promise<Memory[]>;
   saveMemory(m: MemoryInput): Promise<Memory>;
   deleteMemory(id: string): Promise<void>;
+  /** Envia (Blob) ou remove (null) a imagem de uma Memória. */
+  setMemoryImage(memory: Memory, image: Blob | null): Promise<Memory>;
 
   // Campanha
   listSections(): Promise<CampaignSection[]>;

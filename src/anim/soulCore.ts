@@ -92,7 +92,7 @@ export class SoulCore {
   private asc: Ascension | null = null;
   private ro: ResizeObserver | null = null;
   private seed = Math.random() * 1000;
-  private memoryStars: { r: number; tilt: number; speed: number; phase: number; flat: number }[] = [];
+  private memoryStars: { r: number; speed: number; phase: number; color: RGB; bright: RGB; size: number; power: number }[] = [];
   private readonly opts: Required<SoulCoreOptions>;
 
   constructor(private canvas: HTMLCanvasElement, options: SoulCoreOptions) {
@@ -157,17 +157,29 @@ export class SoulCore {
     if (!this.running) this.draw();
   }
 
-  /** Uma estrela cintilante orbita o núcleo para cada Memória do personagem. */
-  setMemories(count: number): void {
-    const n = Math.max(0, Math.min(40, Math.floor(count)));
-    const golden = 2.399963; // ângulo áureo: espalha as órbitas sem padrão visível
-    this.memoryStars = Array.from({ length: n }, (_, i) => ({
-      r: 1.28 + ((i * 0.37) % 1) * 0.75,
-      tilt: -0.9 + ((i * 0.61) % 1) * 1.8,
-      flat: 0.35 + ((i * 0.53) % 1) * 0.4,
-      speed: (0.05 + ((i * 0.29) % 1) * 0.07) * (i % 2 ? 1 : -1),
-      phase: i * golden,
-    }));
+  /**
+   * Cada Memória vira um mini-núcleo orbitando no mesmo plano e sentido do anel do nível 5.
+   * Cor vazia usa a cor do próprio núcleo. O rank (0–7) define o brilho: quanto maior, mais intensa.
+   */
+  setMemories(memories: { color?: string | null; rank?: number }[]): void {
+    const list = memories.slice(0, 40);
+    const golden = 2.399963; // ângulo áureo: espalha as fases sem padrão visível
+    this.memoryStars = list.map((mem, i) => {
+      const hex = mem.color;
+      const rank = Math.max(0, Math.min(7, Math.floor(mem.rank ?? 0)));
+      // rank desconhecido = brilho de Desperto; Dormente 0,45 … Profano 1,35
+      const power = rank === 0 ? 0.6 : 0.3 + rank * 0.15;
+      const color = hex ? luminous(hexToRgb(hex)) : this.color;
+      return {
+        r: 1.32 + ((i * 0.37) % 1) * 0.62,
+        speed: 0.045 + ((i * 0.29) % 1) * 0.05,
+        phase: i * golden,
+        color,
+        bright: mix(color, WHITE, 0.6),
+        size: (0.85 + ((i * 0.53) % 1) * 0.3) * (0.85 + power * 0.2),
+        power,
+      };
+    });
     if (!this.running) this.draw();
   }
 
@@ -638,43 +650,86 @@ export class SoulCore {
     ctx.restore();
   }
 
-  /** Estrelas de quatro pontas, uma por Memória, orbitando em planos diferentes. */
+  /** Mini-núcleos das Memórias: mesmo plano inclinado e mesmo sentido do anel orbital. */
   private drawMemories(cx: number, cy: number, R: number, t: number, front: boolean): void {
     if (!this.memoryStars.length) return;
     const { ctx } = this;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
+    const tilt = -0.32 + Math.sin(t * 0.07) * 0.05; // igual ao anel do nível 5
+    const flat = 0.3;
+    const cosT = Math.cos(tilt);
+    const sinT = Math.sin(tilt);
     for (const m of this.memoryStars) {
       const a = m.phase + t * m.speed * TAU;
-      const z = Math.sin(a);
-      if ((z >= 0) !== front) continue;
+      const na = ((a % TAU) + TAU) % TAU;
+      if ((na < Math.PI) !== front) continue;
       const lx = Math.cos(a) * R * m.r;
-      const ly = Math.sin(a) * R * m.r * m.flat;
-      const x = cx + lx * Math.cos(m.tilt) - ly * Math.sin(m.tilt);
-      const y = cy + lx * Math.sin(m.tilt) + ly * Math.cos(m.tilt);
-      const twinkle = 0.55 + 0.45 * Math.sin(t * 3.1 + m.phase * 5);
-      const depth = front ? 1 : 0.45;
-      const s = R * 0.095 * (0.8 + 0.35 * twinkle) * (front ? 1 : 0.8);
-      // brilho
-      const gs = s * 4;
-      ctx.globalAlpha = 0.55 * twinkle * depth;
-      ctx.drawImage(this.sprite, x - gs / 2, y - gs / 2, gs, gs);
-      ctx.globalAlpha = 1;
-      // estrela de quatro pontas
-      ctx.fillStyle = rgba(WHITE, 0.95 * depth * (0.6 + 0.4 * twinkle));
-      ctx.beginPath();
-      const rot = t * 0.4 + m.phase;
+      const ly = Math.sin(a) * R * m.r * flat;
+      const x = cx + lx * cosT - ly * sinT;
+      const y = cy + lx * sinT + ly * cosT;
+      const depth = front ? 1 : 0.5;
+      const P = m.power;
+      const pulse = 0.5 + 0.5 * Math.sin(t * (2 + P) + m.phase * 3);
+      const twinkle = 0.6 + 0.4 * Math.sin(t * (3.4 + P * 1.5) + m.phase * 7);
+      const r = R * 0.07 * m.size * (front ? 1 : 0.85) * (1 + 0.06 * pulse);
+
+      // aura: maior e mais intensa conforme o rank
+      ctx.globalCompositeOperation = 'lighter';
+      const auraR = r * (3 + 2.6 * P);
+      const aura = ctx.createRadialGradient(x, y, r * 0.4, x, y, auraR);
+      aura.addColorStop(0, rgba(m.bright, Math.min(0.9, (0.3 + 0.35 * P) * (0.7 + 0.3 * pulse)) * depth));
+      aura.addColorStop(0.35, rgba(m.color, (0.12 + 0.16 * P) * depth));
+      aura.addColorStop(1, rgba(m.color, 0));
+      ctx.fillStyle = aura;
+      ctx.fillRect(x - auraR, y - auraR, auraR * 2, auraR * 2);
+
+      // raios de estrela (4 longos + 4 curtos), girando devagar
+      const rot = t * 0.25 + m.phase;
+      const rayLen = r * (2.2 + 3.2 * P) * (0.75 + 0.25 * twinkle);
+      ctx.lineCap = 'round';
       for (let k = 0; k < 8; k++) {
-        const rr = k % 2 === 0 ? s : s * 0.18;
         const ang = rot + (k * Math.PI) / 4;
-        const px = x + Math.cos(ang) * rr;
-        const py = y + Math.sin(ang) * rr;
-        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        const len = k % 2 === 0 ? rayLen : rayLen * 0.45;
+        const ex = x + Math.cos(ang) * len;
+        const ey = y + Math.sin(ang) * len;
+        const g = ctx.createLinearGradient(x, y, ex, ey);
+        g.addColorStop(0, rgba(WHITE, Math.min(1, (0.55 + 0.35 * P) * twinkle) * depth));
+        g.addColorStop(0.3, rgba(m.bright, (0.35 + 0.3 * P) * twinkle * depth));
+        g.addColorStop(1, rgba(m.color, 0));
+        ctx.strokeStyle = g;
+        ctx.lineWidth = Math.max(0.7, r * (k % 2 === 0 ? 0.32 : 0.18));
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
       }
-      ctx.closePath();
+
+      // corpo do mini-núcleo: membrana luminosa e centro escuro
+      ctx.globalCompositeOperation = 'source-over';
+      const body = ctx.createRadialGradient(x, y, 0, x, y, r);
+      body.addColorStop(0, `rgba(0,0,0,${0.85 * depth})`);
+      body.addColorStop(0.4, rgba(mix(m.color, BLACK, 0.6), 0.75 * depth));
+      body.addColorStop(0.8, rgba(m.color, 0.7 * depth));
+      body.addColorStop(1, rgba(m.bright, 0.9 * depth));
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, TAU);
+      ctx.fill();
+
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba(WHITE, Math.min(1, (0.5 + 0.3 * P) * (0.7 + 0.3 * pulse)) * depth);
+      ctx.lineWidth = Math.max(0.6, r * 0.12);
+      ctx.stroke();
+      // centelha central que pisca mais forte nos ranks altos
+      const sparkR = r * (0.3 + 0.25 * P * twinkle);
+      const spark = ctx.createRadialGradient(x, y, 0, x, y, sparkR);
+      spark.addColorStop(0, rgba(WHITE, Math.min(1, 0.4 + 0.5 * P * twinkle) * depth));
+      spark.addColorStop(1, rgba(m.bright, 0));
+      ctx.fillStyle = spark;
+      ctx.beginPath();
+      ctx.arc(x, y, sparkR, 0, TAU);
       ctx.fill();
     }
-    ctx.restore();
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   /** Coroa de raios finos que pulsam ao redor da membrana. */

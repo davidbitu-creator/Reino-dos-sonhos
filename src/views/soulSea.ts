@@ -326,7 +326,7 @@ export function soulSeaView(params: Record<string, string>): ViewInstance {
     sections.push(h('section', { class: 'panel-section' },
       h('h2', { class: 'panel-title' }, 'Memórias'),
       memoryList(c.id, editable, (list) => {
-        memoryCount = list.length;
+        memoryCount = list.map((m) => ({ color: m.color, rank: m.rank }));
         core?.setMemories(memoryCount);
       })));
 
@@ -340,7 +340,7 @@ export function soulSeaView(params: Record<string, string>): ViewInstance {
     replace(panel, h('div', { class: 'panel-inner' }, sections));
   }
 
-  let memoryCount = 0;
+  let memoryCount: { color: string | null; rank: number }[] = [];
   const historyList = h('ol', { class: 'history' });
   async function loadHistory(): Promise<void> {
     try {

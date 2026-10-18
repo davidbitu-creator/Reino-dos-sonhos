@@ -268,17 +268,18 @@ export class SupabaseRepository implements Repository {
 
   /* ---------- memórias ---------- */
 
-  private static toMemory(r: Row): Memory {
-    return {
-      id: r.id, characterId: r.character_id, name: r.name, kind: r.kind ?? '', rank: r.rank ?? 0, tier: r.tier ?? 0,
-      description: r.description ?? '', enchantments: r.enchantments ?? '', createdAt: r.created_at,
-    };
-  }
+  private toMemory = (r: Row): Memory => ({
+    id: r.id, characterId: r.character_id, name: r.name, kind: r.kind ?? '', rank: r.rank ?? 0, tier: r.tier ?? 0,
+    description: r.description ?? '', enchantments: r.enchantments ?? '', color: r.color ?? null,
+    imagePath: r.image_path ?? null,
+    imageUrl: r.image_path ? this.sb.storage.from(this.bucket).getPublicUrl(r.image_path).data.publicUrl : null,
+    createdAt: r.created_at,
+  });
 
   async listMemories(characterId: string): Promise<Memory[]> {
     const res = await this.sb.from('memories').select('*').eq('character_id', characterId).order('created_at');
     fail(res.error);
-    return (res.data as Row[]).map(SupabaseRepository.toMemory);
+    return (res.data as Row[]).map(this.toMemory);
   }
 
   async saveMemory(m: MemoryInput): Promise<Memory> {
@@ -286,18 +287,37 @@ export class SupabaseRepository implements Repository {
     if (!name) throw new Error('Dê um nome à Memória.');
     const row: Row = {
       character_id: m.characterId, name, kind: m.kind, rank: m.rank, tier: m.tier,
-      description: m.description, enchantments: m.enchantments,
+      description: m.description, enchantments: m.enchantments, color: m.color,
     };
     const res = m.id
       ? await this.sb.from('memories').update(row).eq('id', m.id).select('*').single()
       : await this.sb.from('memories').insert(row).select('*').single();
     fail(res.error);
-    return SupabaseRepository.toMemory(res.data);
+    return this.toMemory(res.data);
+  }
+
+  async setMemoryImage(memory: Memory, image: Blob | null): Promise<Memory> {
+    let path: string | null = null;
+    if (image) {
+      // A pasta do dono do personagem é a que as políticas do Storage autorizam.
+      const owner = await this.sb.from('characters').select('owner_id').eq('id', memory.characterId).single();
+      fail(owner.error);
+      path = `${owner.data.owner_id}/${memory.characterId}/memories/${memory.id}-${Date.now()}.jpg`;
+      const up = await this.sb.storage.from(this.bucket).upload(path, image, { contentType: 'image/jpeg', upsert: false, cacheControl: '31536000' });
+      fail(up.error);
+    }
+    const res = await this.sb.from('memories').update({ image_path: path }).eq('id', memory.id).select('*').single();
+    if (res.error && path) await this.sb.storage.from(this.bucket).remove([path]);
+    fail(res.error);
+    if (memory.imagePath && memory.imagePath !== path) await this.sb.storage.from(this.bucket).remove([memory.imagePath]);
+    return this.toMemory(res.data);
   }
 
   async deleteMemory(id: string): Promise<void> {
+    const old = await this.sb.from('memories').select('image_path').eq('id', id).maybeSingle();
     const res = await this.sb.from('memories').delete().eq('id', id);
     fail(res.error);
+    if (old.data?.image_path) await this.sb.storage.from(this.bucket).remove([old.data.image_path]);
   }
 
   /* ---------- campanha ---------- */

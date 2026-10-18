@@ -347,6 +347,8 @@ create table if not exists public.memories (
   tier int not null default 0 check (tier between 0 and 3),
   description text not null default '' check (char_length(description) <= 2000),
   enchantments text not null default '' check (char_length(enchantments) <= 1000),
+  color text check (color is null or color ~ '^#[0-9A-Fa-f]{6}$'),
+  image_path text,
   created_at timestamptz not null default now()
 );
 create index if not exists memories_character_idx on public.memories (character_id, created_at);
