@@ -62,6 +62,11 @@ function seg(p: number, a: number, b: number): number {
   return Math.max(0, Math.min(1, (p - a) / (b - a)));
 }
 
+/** 0 abaixo do limiar, sobe suavemente até 1 logo acima dele. */
+function tierFade(E: number, threshold: number): number {
+  return smooth((E - threshold) / 0.05);
+}
+
 export function energyForLevel(level: number): number {
   const l = Math.max(1, Math.min(20, level));
   return 0.14 + 0.86 * Math.pow((l - 1) / 19, 0.8);
@@ -87,6 +92,7 @@ export class SoulCore {
   private asc: Ascension | null = null;
   private ro: ResizeObserver | null = null;
   private seed = Math.random() * 1000;
+  private memoryStars: { r: number; tilt: number; speed: number; phase: number; flat: number }[] = [];
   private readonly opts: Required<SoulCoreOptions>;
 
   constructor(private canvas: HTMLCanvasElement, options: SoulCoreOptions) {
@@ -148,6 +154,20 @@ export class SoulCore {
   setLevel(level: number, instant = false): void {
     this.targetEnergy = energyForLevel(level);
     if (instant || this.opts.reducedMotion) this.energy = this.targetEnergy;
+    if (!this.running) this.draw();
+  }
+
+  /** Uma estrela cintilante orbita o núcleo para cada Memória do personagem. */
+  setMemories(count: number): void {
+    const n = Math.max(0, Math.min(40, Math.floor(count)));
+    const golden = 2.399963; // ângulo áureo: espalha as órbitas sem padrão visível
+    this.memoryStars = Array.from({ length: n }, (_, i) => ({
+      r: 1.28 + ((i * 0.37) % 1) * 0.75,
+      tilt: -0.9 + ((i * 0.61) % 1) * 1.8,
+      flat: 0.35 + ((i * 0.53) % 1) * 0.4,
+      speed: (0.05 + ((i * 0.29) % 1) * 0.07) * (i % 2 ? 1 : -1),
+      phase: i * golden,
+    }));
     if (!this.running) this.draw();
   }
 
@@ -348,7 +368,12 @@ export class SoulCore {
     const E = this.energy;
     const cx = w / 2;
     const cy = h / 2 - (this.opts.sea ? h * 0.04 : 0);
-    const R = Math.max(12, Math.min(w, h) * this.opts.scale);
+    // O núcleo cresce levemente com o poder (nível 1 ≈ 90%, nível 20 ≈ 112% do tamanho base)
+    const R = Math.max(12, Math.min(w, h) * this.opts.scale * (0.86 + 0.26 * E));
+    // Estágios de poder: surgem gradualmente (e animados durante a ascensão)
+    const tierRing = tierFade(E, 0.36);   // nível 5+: anel orbital
+    const tierCorona = tierFade(E, 0.62); // nível 11+: coroa de raios
+    const tierCrown = tierFade(E, 0.86);  // nível 17+: segundo anel e descargas
 
     // Respiração: lenta, com segundo harmônico (nada mecânico)
     const freq = 1.05 + pulseBoost * 5.5;
@@ -370,6 +395,13 @@ export class SoulCore {
     aura.addColorStop(1, rgba(this.color, 0));
     ctx.fillStyle = aura;
     ctx.fillRect(cx - auraR, cy - auraR, auraR * 2, auraR * 2);
+
+    /* --- estágios de poder (atrás do corpo) --- */
+    if (tierCorona > 0) this.drawCorona(cx, cy, Rb, t, tierCorona, glow);
+    if (tierRing > 0) this.drawOrbit(cx, cy, Rb, t, tierRing, 1.62, 0.3, 0.12, false);
+    if (tierCrown > 0) this.drawOrbit(cx, cy, Rb, t, tierCrown, 1.9, 0.22, -0.09, false, 0.62);
+
+    this.drawMemories(cx, cy, Rb, t, false);
 
     /* --- partículas (atrás) --- */
     const active = Math.round(this.particles.length * (0.28 + 0.72 * E));
@@ -449,6 +481,15 @@ export class SoulCore {
 
     /* --- partículas (frente) --- */
     this.drawParticles(cx, cy, R, t, 0, active, converge, true);
+
+    this.drawMemories(cx, cy, Rb, t, true);
+
+    /* --- estágios de poder (na frente do corpo) --- */
+    if (tierRing > 0) this.drawOrbit(cx, cy, Rb, t, tierRing, 1.62, 0.3, 0.12, true);
+    if (tierCrown > 0) {
+      this.drawOrbit(cx, cy, Rb, t, tierCrown, 1.9, 0.22, -0.09, true, 0.62);
+      this.drawArcs(cx, cy, Rb, t, tierCrown);
+    }
 
     /* --- clarão --- */
     if (flash > 0.01) {
@@ -558,6 +599,140 @@ export class SoulCore {
         ctx.drawImage(this.sprite, x - s / 2, y - s / 2, s, s);
         ctx.globalAlpha = 1;
       }
+    }
+  }
+
+  /** Anel orbital inclinado com um ponto de luz percorrendo-o. Desenhado em duas metades (atrás/frente). */
+  private drawOrbit(cx: number, cy: number, R: number, t: number, k: number, radius: number, flat: number, speed: number, front: boolean, tilt = -0.32): void {
+    const { ctx } = this;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(cx, cy);
+    ctx.rotate(tilt + Math.sin(t * 0.07) * 0.05);
+    const rx = R * radius;
+    const ry = rx * flat;
+    const start = front ? 0 : Math.PI;
+    const end = front ? Math.PI : TAU;
+    // halo largo + traço fino
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, start, end);
+    ctx.strokeStyle = rgba(this.color, 0.09 * k);
+    ctx.lineWidth = Math.max(2, R * 0.06);
+    ctx.stroke();
+    ctx.strokeStyle = rgba(this.bright, (front ? 0.5 : 0.28) * k);
+    ctx.lineWidth = Math.max(0.6, R * 0.006);
+    ctx.stroke();
+    // contas de luz viajando pelo anel
+    for (let i = 0; i < 3; i++) {
+      const a = t * speed * TAU + (i * TAU) / 3;
+      const na = ((a % TAU) + TAU) % TAU;
+      const isFront = na < Math.PI;
+      if (isFront !== front) continue;
+      const x = Math.cos(a) * rx;
+      const y = Math.sin(a) * ry;
+      const s = R * (i === 0 ? 0.22 : 0.13) * (0.7 + 0.3 * k);
+      ctx.globalAlpha = k * (front ? 1 : 0.55);
+      ctx.drawImage(this.sprite, x - s / 2, y - s / 2, s, s);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  /** Estrelas de quatro pontas, uma por Memória, orbitando em planos diferentes. */
+  private drawMemories(cx: number, cy: number, R: number, t: number, front: boolean): void {
+    if (!this.memoryStars.length) return;
+    const { ctx } = this;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const m of this.memoryStars) {
+      const a = m.phase + t * m.speed * TAU;
+      const z = Math.sin(a);
+      if ((z >= 0) !== front) continue;
+      const lx = Math.cos(a) * R * m.r;
+      const ly = Math.sin(a) * R * m.r * m.flat;
+      const x = cx + lx * Math.cos(m.tilt) - ly * Math.sin(m.tilt);
+      const y = cy + lx * Math.sin(m.tilt) + ly * Math.cos(m.tilt);
+      const twinkle = 0.55 + 0.45 * Math.sin(t * 3.1 + m.phase * 5);
+      const depth = front ? 1 : 0.45;
+      const s = R * 0.095 * (0.8 + 0.35 * twinkle) * (front ? 1 : 0.8);
+      // brilho
+      const gs = s * 4;
+      ctx.globalAlpha = 0.55 * twinkle * depth;
+      ctx.drawImage(this.sprite, x - gs / 2, y - gs / 2, gs, gs);
+      ctx.globalAlpha = 1;
+      // estrela de quatro pontas
+      ctx.fillStyle = rgba(WHITE, 0.95 * depth * (0.6 + 0.4 * twinkle));
+      ctx.beginPath();
+      const rot = t * 0.4 + m.phase;
+      for (let k = 0; k < 8; k++) {
+        const rr = k % 2 === 0 ? s : s * 0.18;
+        const ang = rot + (k * Math.PI) / 4;
+        const px = x + Math.cos(ang) * rr;
+        const py = y + Math.sin(ang) * rr;
+        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /** Coroa de raios finos que pulsam ao redor da membrana. */
+  private drawCorona(cx: number, cy: number, R: number, t: number, k: number, glow: number): void {
+    const { ctx } = this;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    const n = 28;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU + t * 0.04;
+      const flick = 0.5 + 0.5 * Math.sin(t * (1.3 + (i % 5) * 0.37) + i * 2.17);
+      const len = R * (0.25 + 0.55 * flick * flick) * k;
+      const r0 = R * 1.02;
+      const g = ctx.createLinearGradient(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len));
+      g.addColorStop(0, rgba(this.bright, 0.35 * k * glow));
+      g.addColorStop(1, rgba(this.color, 0));
+      ctx.strokeStyle = g;
+      ctx.lineWidth = Math.max(0.8, R * (i % 3 === 0 ? 0.018 : 0.008));
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      ctx.lineTo(cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len));
+      ctx.stroke();
+    }
+    // brilho extra próximo à borda
+    const halo = ctx.createRadialGradient(cx, cy, R * 0.95, cx, cy, R * 1.6);
+    halo.addColorStop(0, rgba(this.bright, 0.14 * k * glow));
+    halo.addColorStop(1, rgba(this.color, 0));
+    ctx.fillStyle = halo;
+    ctx.fillRect(cx - R * 1.6, cy - R * 1.6, R * 3.2, R * 3.2);
+  }
+
+  /** Descargas de energia breves entre a membrana e o espaço ao redor (níveis mais altos). */
+  private drawArcs(cx: number, cy: number, R: number, t: number, k: number): void {
+    const { ctx } = this;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < 3; i++) {
+      const cycle = t * 0.55 + i * 0.37;
+      const life = cycle - Math.floor(cycle); // 0..1
+      if (life > 0.22) continue; // cada descarga vive pouco
+      const seed = Math.floor(cycle) * 7.13 + i * 3.1;
+      const a = (Math.sin(seed) * 0.5 + 0.5) * TAU;
+      const alpha = k * (1 - life / 0.22);
+      ctx.beginPath();
+      let r = R * 0.98;
+      let ang = a;
+      ctx.moveTo(cx + Math.cos(ang) * r, cy + Math.sin(ang) * r);
+      for (let s2 = 1; s2 <= 7; s2++) {
+        r += R * 0.11;
+        ang += Math.sin(seed * 13.7 + s2 * 4.1) * 0.12;
+        ctx.lineTo(cx + Math.cos(ang) * r, cy + Math.sin(ang) * r);
+      }
+      ctx.strokeStyle = rgba(this.color, 0.35 * alpha);
+      ctx.lineWidth = Math.max(1.5, R * 0.03);
+      ctx.stroke();
+      ctx.strokeStyle = rgba(WHITE, 0.85 * alpha);
+      ctx.lineWidth = Math.max(0.6, R * 0.006);
+      ctx.stroke();
     }
   }
 

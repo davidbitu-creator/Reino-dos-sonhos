@@ -11,6 +11,7 @@ import { canEditCharacter, canGrantXp, canSeeHistory, canViewCharacter } from '.
 import type { Character, XpEvent } from '../data/types.js';
 import { levelForXp, levelsGained, progressFor, MAX_XP } from '../rules/xp.js';
 import { colorPicker } from '../ui/colorPicker.js';
+import { memoryList } from '../ui/memories.js';
 import { coreSwatch } from '../ui/characterCard.js';
 import { reportError, toast, withBusy } from '../ui/feedback.js';
 import { setXpBar, xpBar } from '../ui/xpBar.js';
@@ -321,6 +322,14 @@ export function soulSeaView(params: Record<string, string>): ViewInstance {
           : 'Entre na sua conta para acompanhar a sua progressão.')));
     }
 
+    // Memórias: cada uma é uma estrela orbitando o núcleo
+    sections.push(h('section', { class: 'panel-section' },
+      h('h2', { class: 'panel-title' }, 'Memórias'),
+      memoryList(c.id, editable, (list) => {
+        memoryCount = list.length;
+        core?.setMemories(memoryCount);
+      })));
+
     // Histórico
     if (history) {
       sections.push(h('section', { class: 'panel-section' },
@@ -331,6 +340,7 @@ export function soulSeaView(params: Record<string, string>): ViewInstance {
     replace(panel, h('div', { class: 'panel-inner' }, sections));
   }
 
+  let memoryCount = 0;
   const historyList = h('ol', { class: 'history' });
   async function loadHistory(): Promise<void> {
     try {
@@ -375,6 +385,7 @@ export function soulSeaView(params: Record<string, string>): ViewInstance {
         reducedMotion: reduced,
         scale: window.innerWidth < 640 ? 0.25 : 0.17,
       });
+      core.setMemories(memoryCount);
       core.start();
       if (pending) {
         shownLevel = seen!;

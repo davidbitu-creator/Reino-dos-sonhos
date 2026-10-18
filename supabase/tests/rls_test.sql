@@ -91,11 +91,18 @@ begin
   select count(*) into n from public.xp_events;
   assert n = 3, 'Ana deveria ver apenas o próprio histórico (3)';
 
+  -- Memórias: Ana cria na própria personagem, não na do Bruno
+  insert into public.memories (character_id, name) values (c_ana, 'Lâmina');
+  begin insert into public.memories (character_id, name) values (c_bruno, 'Roubada'); ok := false;
+  exception when others then ok := true; end;
+  assert ok, 'Ana não deveria criar Memória no personagem do Bruno';
+
   -- Visitante (anon) vê personagens públicos e textos, nada mais
   perform pg_temp.as_user('');
   select count(*) into n from public.characters; assert n = 2, 'anon vê públicos';
   select count(*) into n from public.campaign_sections; assert n = 4, 'anon vê textos';
   select count(*) into n from public.encounters; assert n = 0, 'anon não vê encontros';
+  select count(*) into n from public.memories; assert n = 1, 'anon vê Memórias de personagens públicos';
   reset role;
   raise notice 'TODOS OS TESTES DE RLS PASSARAM';
 end $$;

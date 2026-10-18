@@ -7,7 +7,7 @@ import type { CreatureDefault } from '../rules/encounter.js';
 import {
   PermissionError,
   type CampaignSection, type CampaignSettings, type Character, type CharacterPatch, type EncounterData,
-  type NewCharacter, type Profile, type Repository, type Role, type SavedEncounter, type Session,
+  type Memory, type MemoryInput, type NewCharacter, type Profile, type Repository, type Role, type SavedEncounter, type Session,
   type XpChange, type XpEvent,
 } from './types.js';
 
@@ -264,6 +264,40 @@ export class SupabaseRepository implements Repository {
       id: ev.id, characterId: ev.character_id, kind: ev.kind, delta: ev.delta, previousXp: ev.previous_xp,
       newXp: ev.new_xp, reason: ev.reason, createdByName: ev.created_by_name, createdAt: ev.created_at,
     }));
+  }
+
+  /* ---------- memórias ---------- */
+
+  private static toMemory(r: Row): Memory {
+    return {
+      id: r.id, characterId: r.character_id, name: r.name, kind: r.kind ?? '', rank: r.rank ?? 0, tier: r.tier ?? 0,
+      description: r.description ?? '', enchantments: r.enchantments ?? '', createdAt: r.created_at,
+    };
+  }
+
+  async listMemories(characterId: string): Promise<Memory[]> {
+    const res = await this.sb.from('memories').select('*').eq('character_id', characterId).order('created_at');
+    fail(res.error);
+    return (res.data as Row[]).map(SupabaseRepository.toMemory);
+  }
+
+  async saveMemory(m: MemoryInput): Promise<Memory> {
+    const name = m.name.trim();
+    if (!name) throw new Error('Dê um nome à Memória.');
+    const row: Row = {
+      character_id: m.characterId, name, kind: m.kind, rank: m.rank, tier: m.tier,
+      description: m.description, enchantments: m.enchantments,
+    };
+    const res = m.id
+      ? await this.sb.from('memories').update(row).eq('id', m.id).select('*').single()
+      : await this.sb.from('memories').insert(row).select('*').single();
+    fail(res.error);
+    return SupabaseRepository.toMemory(res.data);
+  }
+
+  async deleteMemory(id: string): Promise<void> {
+    const res = await this.sb.from('memories').delete().eq('id', id);
+    fail(res.error);
   }
 
   /* ---------- campanha ---------- */

@@ -11,7 +11,7 @@ import { blobToDataUrl } from './images.js';
 import {
   PermissionError,
   type CampaignSection, type CampaignSettings, type Character, type CharacterPatch, type EncounterData,
-  type NewCharacter, type Profile, type Repository, type Role, type SavedEncounter, type Session,
+  type Memory, type MemoryInput, type NewCharacter, type Profile, type Repository, type Role, type SavedEncounter, type Session,
   type XpChange, type XpEvent,
 } from './types.js';
 
@@ -22,6 +22,7 @@ interface DemoDb {
   profiles: Profile[];
   characters: Character[];
   xpEvents: XpEvent[];
+  memories: Memory[];
   sections: CampaignSection[];
   settings: CampaignSettings;
   defaults: CreatureDefault[];
@@ -81,7 +82,17 @@ function seed(): DemoDb {
     { id: uid(), characterId: 'demo-c1', kind: 'add', delta: 1950, previousXp: 900, newXp: 2850, reason: 'Sessão 2 — a ponte de ossos', createdByName: 'Mestre', createdAt: '2026-09-16T23:40:00.000Z' },
   ];
   return {
-    profiles, characters, xpEvents, sections: DEFAULT_SECTIONS.map((s) => ({ ...s })),
+    profiles, characters, xpEvents,
+    memories: [
+      { id: 'demo-m1', characterId: 'demo-c1', name: 'Lâmina do Silêncio Branco', kind: 'Arma', rank: 1, tier: 2,
+        description: 'Uma adaga de gelo que não derrete. Quando desembainhada, os sons ao redor ficam abafados.',
+        enchantments: '[Quietude] Passos e respiração da portadora não fazem som.', createdAt: '2026-09-02T22:20:00.000Z' },
+      { id: 'demo-m2', characterId: 'demo-c1', name: 'Manto de Penas Cinzentas', kind: 'Armadura', rank: 1, tier: 1,
+        description: 'Leve como cinza, aquece mesmo nas noites mais frias do Reino.', enchantments: '', createdAt: '2026-09-16T23:50:00.000Z' },
+      { id: 'demo-m3', characterId: 'demo-c4', name: 'Bússola das Ruínas', kind: 'Ferramenta', rank: 2, tier: 1,
+        description: 'Aponta sempre para o lugar mais antigo nas redondezas.', enchantments: '', createdAt: '2026-09-01T20:00:00.000Z' },
+    ],
+    sections: DEFAULT_SECTIONS.map((s) => ({ ...s })),
     settings: { playersCanGrantXp: false, playersCanCreateCharacters: true,
       rewardRules: 'Ao derrotar uma Criatura do Pesadelo, o grupo pode obter fragmentos de alma. A quantidade é definida pelo mestre em cada encontro; núcleos inteiros nunca são obtidos automaticamente.' },
     defaults: [
@@ -290,6 +301,7 @@ export class DemoRepository implements Repository {
     this.findEditable(id);
     this.db.characters = this.db.characters.filter((c) => c.id !== id);
     this.db.xpEvents = this.db.xpEvents.filter((e) => e.characterId !== id);
+    this.db.memories = (this.db.memories ?? []).filter((m) => m.characterId !== id);
     this.save();
   }
 
@@ -347,6 +359,39 @@ export class DemoRepository implements Repository {
       .filter((e) => e.characterId === characterId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((e) => ({ ...e }));
+  }
+
+  /* ---------- memórias ---------- */
+
+  async listMemories(characterId: string): Promise<Memory[]> {
+    const me = this.current();
+    const c = this.db.characters.find((x) => x.id === characterId);
+    if (!c || !(c.isPublic || me?.role === 'master' || c.ownerId === me?.id)) return [];
+    return (this.db.memories ?? [])
+      .filter((m) => m.characterId === characterId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((m) => ({ ...m }));
+  }
+
+  async saveMemory(input: MemoryInput): Promise<Memory> {
+    this.findEditable(input.characterId);
+    const name = input.name.trim();
+    if (!name) throw new Error('Dê um nome à Memória.');
+    this.db.memories = this.db.memories ?? [];
+    const existing = input.id ? this.db.memories.find((m) => m.id === input.id) : undefined;
+    const m: Memory = { ...input, name, id: existing?.id ?? uid(), createdAt: existing?.createdAt ?? now() };
+    this.db.memories = this.db.memories.filter((x) => x.id !== m.id);
+    this.db.memories.push(m);
+    this.save();
+    return { ...m };
+  }
+
+  async deleteMemory(id: string): Promise<void> {
+    const m = (this.db.memories ?? []).find((x) => x.id === id);
+    if (!m) return;
+    this.findEditable(m.characterId);
+    this.db.memories = this.db.memories.filter((x) => x.id !== id);
+    this.save();
   }
 
   /* ---------- campanha ---------- */

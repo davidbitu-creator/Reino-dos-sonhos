@@ -8,6 +8,7 @@ import { progressFor } from '../rules/xp.js';
 import { openCharacterForm } from '../ui/characterForm.js';
 import { confirmDialog, toast, withBusy } from '../ui/feedback.js';
 import { openImageManager } from '../ui/imageFramer.js';
+import { memoryList } from '../ui/memories.js';
 import { portrait } from '../ui/portrait.js';
 import { xpBar } from '../ui/xpBar.js';
 import { notFoundView } from './notFound.js';
@@ -19,6 +20,7 @@ export function characterView(params: Record<string, string>): ViewInstance {
   }
   let c: Character = initial;
   let core: SoulCore | null = null;
+  let coreMemories = 0;
 
   const media = h('div', { class: 'char-hero-media' });
   const info = h('div', { class: 'char-hero-info' });
@@ -51,6 +53,9 @@ export function characterView(params: Record<string, string>): ViewInstance {
           prog.isMax ? `${fmt(prog.xp)} XP — nível máximo` : `${fmt(prog.xp)} / ${fmt(prog.next!)} XP`),
         xpBar(prog.ratio, `Progresso até o nível ${prog.level + 1}`)),
       c.bio ? h('div', { class: 'char-bio' }, c.bio.split(/\n{2,}/).map((p) => h('p', null, p))) : null,
+      h('section', { class: 'char-memories', 'aria-labelledby': 'char-mem-t' },
+        h('h2', { class: 'char-section-title', id: 'char-mem-t' }, 'Memórias'),
+        memoryList(c.id, editable, (list) => { coreMemories = list.length; core?.setMemories(coreMemories); })),
       h('a', { class: 'sea-door', href: `#/mar-da-alma/${encodeURIComponent(c.id)}` },
         h('span', { class: 'sea-door-core' }, coreCanvas),
         h('span', { class: 'sea-door-text' },
@@ -63,6 +68,7 @@ export function characterView(params: Record<string, string>): ViewInstance {
     requestAnimationFrame(() => {
       if (!coreCanvas.isConnected) return;
       core = new SoulCore(coreCanvas, { color: c.coreColor, level: prog.level, progress: prog.ratio, compact: true, scale: 0.3, reducedMotion: prefersReducedMotion() });
+      core.setMemories(coreMemories);
       core.start();
     });
   }

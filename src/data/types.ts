@@ -52,6 +52,23 @@ export interface NewCharacter extends CharacterEditable {
   soulCores?: number;
 }
 
+export interface Memory {
+  id: string;
+  characterId: string;
+  name: string;
+  /** Arma, armadura, ferramenta, adorno, outro */
+  kind: string;
+  /** Rank da Memória (1–7, mesma escala das criaturas) ou 0 se desconhecido */
+  rank: number;
+  /** Tier dentro do rank (1–3) ou 0 */
+  tier: number;
+  description: string;
+  enchantments: string;
+  createdAt: string;
+}
+
+export type MemoryInput = Omit<Memory, 'id' | 'createdAt'> & { id?: string };
+
 export interface XpEvent {
   id: string;
   characterId: string;
@@ -136,6 +153,11 @@ export interface Repository {
   // XP
   applyXp(characterId: string, change: XpChange): Promise<{ character: Character; event: XpEvent }>;
   listXpEvents(characterId: string): Promise<XpEvent[]>;
+
+  // Memórias
+  listMemories(characterId: string): Promise<Memory[]>;
+  saveMemory(m: MemoryInput): Promise<Memory>;
+  deleteMemory(id: string): Promise<void>;
 
   // Campanha
   listSections(): Promise<CampaignSection[]>;
