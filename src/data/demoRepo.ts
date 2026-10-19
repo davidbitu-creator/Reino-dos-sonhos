@@ -11,7 +11,7 @@ import { blobToDataUrl } from './images.js';
 import {
   PermissionError,
   type CampaignSection, type CampaignSettings, type Character, type CharacterPatch, type EncounterData,
-  type Memory, type MemoryInput, type NewCharacter, type Profile, type Repository, type Role, type SavedEncounter, type Session,
+  type CharacterPrivate, type Memory, type MemoryInput, type NewCharacter, type Profile, type Repository, type Role, type SavedEncounter, type Session,
   type XpChange, type XpEvent,
 } from './types.js';
 
@@ -23,6 +23,7 @@ interface DemoDb {
   characters: Character[];
   xpEvents: XpEvent[];
   memories: Memory[];
+  privates?: Record<string, CharacterPrivate & { sheetData?: string }>;
   sections: CampaignSection[];
   settings: CampaignSettings;
   defaults: CreatureDefault[];
@@ -302,6 +303,7 @@ export class DemoRepository implements Repository {
     this.db.characters = this.db.characters.filter((c) => c.id !== id);
     this.db.xpEvents = this.db.xpEvents.filter((e) => e.characterId !== id);
     this.db.memories = (this.db.memories ?? []).filter((m) => m.characterId !== id);
+    if (this.db.privates) delete this.db.privates[id];
     this.save();
   }
 
@@ -359,6 +361,68 @@ export class DemoRepository implements Repository {
       .filter((e) => e.characterId === characterId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((e) => ({ ...e }));
+  }
+
+  /* ---------- dados privados ---------- */
+
+  private privateFor(characterId: string): CharacterPrivate & { sheetData?: string } {
+    const me = this.requireUser();
+    const c = this.db.characters.find((x) => x.id === characterId);
+    if (!c) throw new Error('Personagem não encontrado.');
+    if (me.role !== 'master' && c.ownerId !== me.id) throw new PermissionError('A história e a ficha são visíveis só para o dono e o mestre.');
+    this.db.privates = this.db.privates ?? {};
+    return this.db.privates[characterId] ??= { characterId, lore: '', sheetPath: null, sheetName: null, sheetSize: null, updatedAt: null };
+  }
+
+  private publicPrivate(p: CharacterPrivate & { sheetData?: string }): CharacterPrivate {
+    const { sheetData: _omit, ...rest } = p;
+    void _omit;
+    return { ...rest };
+  }
+
+  async getPrivate(characterId: string): Promise<CharacterPrivate> {
+    return this.publicPrivate(this.privateFor(characterId));
+  }
+
+  async saveLore(characterId: string, lore: string): Promise<CharacterPrivate> {
+    const p = this.privateFor(characterId);
+    p.lore = lore.slice(0, 20000);
+    p.updatedAt = now();
+    this.save();
+    return this.publicPrivate(p);
+  }
+
+  async uploadSheet(character: Character, file: File): Promise<CharacterPrivate> {
+    const p = this.privateFor(character.id);
+    if (file.size > 2 * 1024 * 1024) throw new Error('Na demonstração, a ficha pode ter até 2 MB. No site real, até 10 MB.');
+    const prev = { ...p };
+    p.sheetData = await blobToDataUrl(file);
+    p.sheetPath = `demo/sheet/${character.id}`;
+    p.sheetName = file.name;
+    p.sheetSize = file.size;
+    p.updatedAt = now();
+    try {
+      this.save();
+    } catch (e) {
+      Object.assign(p, prev);
+      throw e;
+    }
+    return this.publicPrivate(p);
+  }
+
+  async removeSheet(characterId: string): Promise<CharacterPrivate> {
+    const p = this.privateFor(characterId);
+    delete p.sheetData;
+    p.sheetPath = p.sheetName = null;
+    p.sheetSize = null;
+    this.save();
+    return this.publicPrivate(p);
+  }
+
+  async sheetDownloadUrl(characterId: string): Promise<string> {
+    const p = this.privateFor(characterId);
+    if (!p.sheetData) throw new Error('Nenhuma ficha anexada.');
+    return p.sheetData;
   }
 
   /* ---------- memórias ---------- */

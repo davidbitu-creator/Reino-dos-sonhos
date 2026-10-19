@@ -97,12 +97,32 @@ begin
   exception when others then ok := true; end;
   assert ok, 'Ana não deveria criar Memória no personagem do Bruno';
 
+  -- História e ficha: Ana escreve a própria; não lê nem escreve a do Bruno
+  insert into public.character_private (character_id, lore) values (c_ana, 'Segredo da Iris');
+  begin insert into public.character_private (character_id, lore) values (c_bruno, 'x'); ok := false;
+  exception when others then ok := true; end;
+  assert ok, 'Ana não deveria escrever a história do Bruno';
+  insert into storage.objects (bucket_id, name) values ('character-sheets', ana::text || '/' || c_ana::text || '/ficha.pdf');
+  begin insert into storage.objects (bucket_id, name) values ('character-sheets', bruno::text || '/x/ficha.pdf'); ok := false;
+  exception when others then ok := true; end;
+  assert ok, 'Ana não deveria enviar ficha na pasta do Bruno';
+  perform pg_temp.as_user(bruno::text);
+  insert into public.character_private (character_id, lore) values (c_bruno, 'Segredo do Teo');
+  insert into storage.objects (bucket_id, name) values ('character-sheets', bruno::text || '/' || c_bruno::text || '/ficha.pdf');
+  select count(*) into n from public.character_private where character_id = c_ana; assert n = 0, 'Bruno não lê a história da Ana';
+  select count(*) into n from storage.objects where bucket_id = 'character-sheets' and name like ana::text || '%'; assert n = 0, 'Bruno não vê a ficha da Ana';
+  perform pg_temp.as_user('00000000-0000-0000-0000-00000000000a');
+  select count(*) into n from public.character_private; assert n = 2, 'mestre lê todas as histórias';
+  select count(*) into n from storage.objects where bucket_id = 'character-sheets'; assert n = 2, 'mestre vê todas as fichas';
+  perform pg_temp.as_user(ana::text);
+
   -- Visitante (anon) vê personagens públicos e textos, nada mais
   perform pg_temp.as_user('');
   select count(*) into n from public.characters; assert n = 2, 'anon vê públicos';
   select count(*) into n from public.campaign_sections; assert n = 4, 'anon vê textos';
   select count(*) into n from public.encounters; assert n = 0, 'anon não vê encontros';
   select count(*) into n from public.memories; assert n = 1, 'anon vê Memórias de personagens públicos';
+  select count(*) into n from public.character_private; assert n = 0, 'anon não lê histórias';
   reset role;
   raise notice 'TODOS OS TESTES DE RLS PASSARAM';
 end $$;

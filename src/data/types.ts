@@ -73,6 +73,16 @@ export interface Memory {
 
 export type MemoryInput = Omit<Memory, 'id' | 'createdAt' | 'imagePath' | 'imageUrl'> & { id?: string };
 
+/** Dados privados do personagem: só o dono e o mestre acessam. */
+export interface CharacterPrivate {
+  characterId: string;
+  lore: string;
+  sheetPath: string | null;
+  sheetName: string | null;
+  sheetSize: number | null;
+  updatedAt: string | null;
+}
+
 export interface XpEvent {
   id: string;
   characterId: string;
@@ -157,6 +167,14 @@ export interface Repository {
   // XP
   applyXp(characterId: string, change: XpChange): Promise<{ character: Character; event: XpEvent }>;
   listXpEvents(characterId: string): Promise<XpEvent[]>;
+
+  // Dados privados (história e ficha)
+  getPrivate(characterId: string): Promise<CharacterPrivate>;
+  saveLore(characterId: string, lore: string): Promise<CharacterPrivate>;
+  uploadSheet(character: Character, file: File): Promise<CharacterPrivate>;
+  removeSheet(characterId: string): Promise<CharacterPrivate>;
+  /** URL temporária para baixar a ficha. */
+  sheetDownloadUrl(characterId: string): Promise<string>;
 
   // Memórias
   listMemories(characterId: string): Promise<Memory[]>;

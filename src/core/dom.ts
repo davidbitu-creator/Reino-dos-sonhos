@@ -89,7 +89,7 @@ export function prefersReducedMotion(): boolean {
 }
 
 /** Ícones de linha fina (SVG inline). */
-export function icon(name: 'close' | 'arrow-left' | 'edit' | 'image' | 'plus' | 'trash' | 'save' | 'eye-off' | 'check' | 'chevron' | 'sea', label?: string): SVGElement {
+export function icon(name: 'close' | 'arrow-left' | 'edit' | 'image' | 'plus' | 'trash' | 'save' | 'eye-off' | 'check' | 'chevron' | 'sea' | 'download', label?: string): SVGElement {
   const paths: Record<string, string> = {
     close: 'M5 5l14 14M19 5L5 19',
     'arrow-left': 'M19 12H5m6-6l-6 6 6 6',
@@ -102,6 +102,7 @@ export function icon(name: 'close' | 'arrow-left' | 'edit' | 'image' | 'plus' | 
     check: 'M5 13l4 4L19 7',
     chevron: 'M7 10l5 5 5-5',
     sea: 'M12 4a8 8 0 1 0 0.01 0M12 9a3 3 0 1 0 0.01 0',
+    download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
   };
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');

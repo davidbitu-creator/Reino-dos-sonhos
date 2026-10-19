@@ -7,7 +7,7 @@ import type { CreatureDefault } from '../rules/encounter.js';
 import {
   PermissionError,
   type CampaignSection, type CampaignSettings, type Character, type CharacterPatch, type EncounterData,
-  type Memory, type MemoryInput, type NewCharacter, type Profile, type Repository, type Role, type SavedEncounter, type Session,
+  type CharacterPrivate, type Memory, type MemoryInput, type NewCharacter, type Profile, type Repository, type Role, type SavedEncounter, type Session,
   type XpChange, type XpEvent,
 } from './types.js';
 
@@ -40,6 +40,7 @@ interface SupabaseLike {
       upload(path: string, body: Blob, o?: Row): Promise<{ error: { message: string } | null }>;
       remove(paths: string[]): Promise<{ error: { message: string } | null }>;
       getPublicUrl(path: string): { data: { publicUrl: string } };
+      createSignedUrl(path: string, expiresIn: number, o?: Row): Promise<{ data: { signedUrl: string } | null; error: { message: string } | null }>;
     };
   };
 }
@@ -264,6 +265,66 @@ export class SupabaseRepository implements Repository {
       id: ev.id, characterId: ev.character_id, kind: ev.kind, delta: ev.delta, previousXp: ev.previous_xp,
       newXp: ev.new_xp, reason: ev.reason, createdByName: ev.created_by_name, createdAt: ev.created_at,
     }));
+  }
+
+  /* ---------- dados privados ---------- */
+  private static SHEETS = 'character-sheets';
+
+  private static toPrivate(characterId: string, r: Row | null): CharacterPrivate {
+    return {
+      characterId, lore: r?.lore ?? '', sheetPath: r?.sheet_path ?? null, sheetName: r?.sheet_name ?? null,
+      sheetSize: r?.sheet_size ?? null, updatedAt: r?.updated_at ?? null,
+    };
+  }
+
+  async getPrivate(characterId: string): Promise<CharacterPrivate> {
+    const res = await this.sb.from('character_private').select('*').eq('character_id', characterId).maybeSingle();
+    fail(res.error);
+    return SupabaseRepository.toPrivate(characterId, res.data);
+  }
+
+  private async upsertPrivate(characterId: string, row: Row): Promise<CharacterPrivate> {
+    const res = await this.sb.from('character_private')
+      .upsert({ character_id: characterId, ...row, updated_at: new Date().toISOString() }, { onConflict: 'character_id' })
+      .select('*').single();
+    fail(res.error);
+    return SupabaseRepository.toPrivate(characterId, res.data);
+  }
+
+  async saveLore(characterId: string, lore: string): Promise<CharacterPrivate> {
+    return this.upsertPrivate(characterId, { lore: lore.slice(0, 20000) });
+  }
+
+  async uploadSheet(character: Character, file: File): Promise<CharacterPrivate> {
+    if (file.size > 10 * 1024 * 1024) throw new Error('A ficha pode ter até 10 MB.');
+    const before = await this.getPrivate(character.id);
+    const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-80) || 'ficha';
+    const path = `${character.ownerId}/${character.id}/${Date.now()}-${safe}`;
+    const up = await this.sb.storage.from(SupabaseRepository.SHEETS).upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+    fail(up.error);
+    try {
+      const next = await this.upsertPrivate(character.id, { sheet_path: path, sheet_name: file.name.slice(0, 200), sheet_size: file.size });
+      if (before.sheetPath) await this.sb.storage.from(SupabaseRepository.SHEETS).remove([before.sheetPath]);
+      return next;
+    } catch (e) {
+      await this.sb.storage.from(SupabaseRepository.SHEETS).remove([path]);
+      throw e;
+    }
+  }
+
+  async removeSheet(characterId: string): Promise<CharacterPrivate> {
+    const before = await this.getPrivate(characterId);
+    const next = await this.upsertPrivate(characterId, { sheet_path: null, sheet_name: null, sheet_size: null });
+    if (before.sheetPath) await this.sb.storage.from(SupabaseRepository.SHEETS).remove([before.sheetPath]);
+    return next;
+  }
+
+  async sheetDownloadUrl(characterId: string): Promise<string> {
+    const p = await this.getPrivate(characterId);
+    if (!p.sheetPath) throw new Error('Nenhuma ficha anexada.');
+    const res = await this.sb.storage.from(SupabaseRepository.SHEETS).createSignedUrl(p.sheetPath, 120, { download: p.sheetName ?? true });
+    fail(res.error);
+    return res.data!.signedUrl;
   }
 
   /* ---------- memórias ---------- */
